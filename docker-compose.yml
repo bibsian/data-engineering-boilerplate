@@ -1,0 +1,64 @@
+version: '3'
+services:
+  warehouse:
+    container_name: warehouse # prevents docker-compose name prefixing\
+    image: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      # Can hide in AWS parameter store and set during container build
+      # using bash... I think (not using the cloud because I'm
+      # not sure how that would work with this exercise)
+      POSTGRES_PASSWORD: 'thiswouldbehidden'
+      POSTGRES_DB: earthquakes_prod
+    volumes:
+      - ./schema/tables.sql:/opt/program/tables.sql # created using config
+      - ./schema/config.sh:/docker-entrypoint-initdb.d/config.sh # create extra db/tables
+
+  sensor_earthquake:
+    container_name: sensor_earthquake
+    build:
+      context: .
+      dockerfile: ./service/sensor_earthquake/Dockerfile
+    volumes:
+      - ./service/sensor_earthquake/main.py:/opt/program/main.py
+      - ./service/sensor_earthquake/earthquake_activity.py:/opt/program/earthquake_activity.py
+    environment:
+      - PYTHONBUFFERED=1
+      - STAGE="prod"
+    depends_on:
+      - warehouse
+    command: python3 -u /opt/program/main.py
+
+  sensor_tectonic_stress:
+    container_name: sensor_tectonic_stress
+    build:
+      context: .
+      dockerfile: ./service/sensor_tectonic_stress/Dockerfile
+    volumes:
+      - ./service/sensor_tectonic_stress/main.py:/opt/program/main.py
+      - ./service/sensor_tectonic_stress/tectonic_stress_activity.py:/opt/program/tectonic_stress_activity.py
+    environment:
+      - PYTHONBUFFERED=1
+      - STAGE="prod"
+    depends_on:
+      - warehouse
+    command: python3 -u /opt/program/main.py
+
+  pipeline_tests:
+    container_name: pipeline_tests
+    build:
+      context: .
+      dockerfile: ./service/pipeline_tests/Dockerfile
+    volumes:
+      - ./service/pipeline_tests/tests.sh:/opt/program/tests.sh
+      - ./service/pipeline_tests/tests/:/opt/program/tests
+    environment:
+      - STAGE="dev"
+    depends_on:
+      - warehouse
+    command: bash /opt/program/tests.sh
+    #privileged: true
+    #tty: true
+    #entrypoint: ['bash']
+
