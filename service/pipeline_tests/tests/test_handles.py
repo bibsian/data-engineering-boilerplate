@@ -1,6 +1,7 @@
-import time
-import json
 from datetime import datetime
+import json
+import time
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -36,6 +37,10 @@ def activity():
         'timestamp': datetime.now().isoformat()
     })
 
+
+def test_kakfa_send(activity):
+    print('this is working')
+    pass
 
 def test_insert(setup, activity):
     handler = EarthquakeStream(ENGINE)

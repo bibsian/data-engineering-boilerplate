@@ -78,8 +78,8 @@ services:
       - STAGE="dev"
     depends_on:
       - warehouse
-    command: bash /opt/program/tests.sh
-    #privileged: true
-    #tty: true
-    #entrypoint: ['bash']
+    #command: bash /opt/program/tests.sh
+    privileged: true
+    tty: true
+    entrypoint: ["/bin/bash"]
 

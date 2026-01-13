@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 STAGE = os.getenv("STAGE", "dev")
 if "dev" in STAGE:
-    CONN_STR = "postgresql+psycopg2://postgres:thiswouldbehidden@warehouse_dev/earthquakes_dev"
+    CONN_STR = "postgresql+psycopg2://postgres:thiswouldbehidden@warehouse/earthquakes_dev"
 else:
     CONN_STR = "postgresql+psycopg2://postgres:thiswouldbehidden@warehouse/earthquakes_prod"
 
