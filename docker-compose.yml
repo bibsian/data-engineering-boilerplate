@@ -30,7 +30,10 @@ services:
     command: |
       "
       # Wait for Kafka to be ready
-      kafka-topics --bootstrap-server kafka:9092 --list
+      until kafka-topics --bootstrap-server kafka:9092 --list > /dev/null 2>&1; do
+        echo 'waiting for Kafka...'
+        sleep 2
+      done
       
       # Create topics
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic earthquake-raw-dev --partitions 1 --replication-factor 1
