@@ -42,6 +42,18 @@ services:
       kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tectonic-stress-raw-prod --partitions 1 --replication-factor 1
       "
 
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
   warehouse:
     container_name: warehouse # prevents docker-compose name prefixing\
     image: postgres
@@ -104,3 +116,5 @@ services:
     tty: true
     entrypoint: ["/bin/bash"]
 
+volumes:
+  minio_data:

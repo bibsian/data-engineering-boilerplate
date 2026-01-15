@@ -23,3 +23,6 @@ def create_producer():
         bootstrap_servers='kafka:9092',
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
     )
+
+def create_consumer():
+    pass

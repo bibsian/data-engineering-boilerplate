@@ -2,6 +2,8 @@ import os
 import json
 import logging
 
+from sqlalchemy import text
+
 logger = logging.getLogger(__name__)
 
 STAGE = os.getenv("STAGE", "dev")
@@ -39,7 +41,9 @@ class EarthquakeStream(StreamDirectToDbBase):
         self.exception_cnt = 0
 
     def insert(self, raw:str):
-        self.engine.execute(self.json_insert(self.TABLE_NAME, data=raw))
+        stmt = self.json_insert(self.TABLE_NAME, data=raw)
+        with self.engine.connect() as connection:
+            connection.execute(text(stmt))
 
     def pre_process(self, data):
         return json.loads(data)

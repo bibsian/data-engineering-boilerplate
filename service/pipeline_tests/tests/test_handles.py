@@ -1,9 +1,9 @@
 from datetime import datetime
 import json
 import time
-from unittest.mock import Mock, patch
 
 import pytest
+from sqlalchemy import text
 
 from db import create_engine
 from stream_handles import EarthquakeStream
@@ -11,10 +11,12 @@ from stream_handles import EarthquakeStream
 ENGINE = create_engine()
 
 def empty_tbl(name):
-    return ENGINE.execute(f"DELETE FROM {name}")
+    with ENGINE.connect() as connection:
+        return connection.execute(text(f"DELETE FROM {name}"))
 
 def all_from_tbl(name):
-    return ENGINE.execute(f"SELECT * FROM {name}").fetchall()
+    with ENGINE.connect() as connection:
+        return connection.execute(text(f"SELECT * FROM {name}")).fetchall()
 
 @pytest.fixture
 def setup():
@@ -36,11 +38,6 @@ def activity():
         'magnitude': 3.4,
         'timestamp': datetime.now().isoformat()
     })
-
-
-def test_kakfa_send(activity):
-    print('this is working')
-    pass
 
 def test_insert(setup, activity):
     handler = EarthquakeStream(ENGINE)
