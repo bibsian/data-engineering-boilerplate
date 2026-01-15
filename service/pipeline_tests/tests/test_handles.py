@@ -11,11 +11,11 @@ from stream_handles import EarthquakeStream
 ENGINE = create_engine()
 
 def empty_tbl(name):
-    with ENGINE.connect() as connection:
+    with ENGINE.begin() as connection:
         return connection.execute(text(f"DELETE FROM {name}"))
 
 def all_from_tbl(name):
-    with ENGINE.connect() as connection:
+    with ENGINE.begin() as connection:
         return connection.execute(text(f"SELECT * FROM {name}")).fetchall()
 
 @pytest.fixture

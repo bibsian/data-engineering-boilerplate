@@ -42,7 +42,7 @@ class EarthquakeStream(StreamDirectToDbBase):
 
     def insert(self, raw:str):
         stmt = self.json_insert(self.TABLE_NAME, data=raw)
-        with self.engine.connect() as connection:
+        with self.engine.begin() as connection:
             connection.execute(text(stmt))
 
     def pre_process(self, data):

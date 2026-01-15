@@ -57,6 +57,11 @@ services:
   warehouse:
     container_name: warehouse # prevents docker-compose name prefixing\
     image: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     ports:
       - "5432:5432"
     environment:
@@ -110,11 +115,12 @@ services:
     environment:
       - STAGE="dev"
     depends_on:
-      - warehouse
-    #command: bash /opt/program/tests.sh
-    privileged: true
-    tty: true
-    entrypoint: ["/bin/bash"]
+      warehouse:
+        condition: service_healthy
+    command: bash /opt/program/tests.sh
+    #privileged: true
+    #tty: true
+    #entrypoint: ["/bin/bash"]
 
 volumes:
   minio_data:
