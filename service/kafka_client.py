@@ -5,11 +5,7 @@ from kafka import KafkaProducer,KafkaConsumer
 
 logger = logging.getLogger(__name__)
 
-STAGE = os.getenv("STAGE", "dev")
-if "dev" in STAGE:
-    TOPIC_STR = "dev"
-else:
-    TOPIC_STR = "prod"
+TOPIC_STAGE = os.getenv("STAGE", "dev")
 
 
 def create_producer():
@@ -21,8 +17,15 @@ def create_producer():
     
     return KafkaProducer(
         bootstrap_servers='kafka:9092',
+        ackacks='all',
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
     )
 
-def create_consumer():
-    pass
+def create_consumer(topic:str):
+    return KafkaConsumer(
+        topic+TOPIC_STAGE,
+        bootstrap_servers='kafka:9092',
+        value_deserializer=lambda m: json.loads(m.decode('utf-8')),
+        auto_offset_reset='earliest',
+        group_id='minio-consumer-group'
+    )
