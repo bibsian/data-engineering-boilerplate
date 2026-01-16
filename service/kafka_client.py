@@ -1,7 +1,7 @@
 import logging
 import os
 
-from kafka import KafkaProducer
+from kafka import KafkaProducer,KafkaConsumer
 
 logger = logging.getLogger(__name__)
 
