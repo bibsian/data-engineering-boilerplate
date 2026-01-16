@@ -1,4 +1,4 @@
-import datetime
+from datetime import datetime
 import io
 import os
 import json
@@ -28,9 +28,15 @@ class BronzeConsumerBase:
         self.last_flush = time.time()
         self.buffer = []
 
-    def consume_batch(self, message):
+    def consume_batch(self):
         for message in self.consumer:
-            self.buffer.append(message.value)
+            record = {
+                "offset": message.offset,
+                "timestamp": message.timestamp,
+                "key": message.key.decode() if message.key else None,
+                "value": json.loads(message.value.decode())
+            }
+            self.buffer.append(record)
             if self.should_flush():
                self.flush()
                self.last_flush = time.time()
