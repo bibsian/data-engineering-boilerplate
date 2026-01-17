@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 
@@ -17,7 +18,6 @@ def create_producer():
     
     return KafkaProducer(
         bootstrap_servers='kafka:9092',
-        ackacks='all',
         value_serializer=lambda v: json.dumps(v).encode('utf-8')
     )
 
