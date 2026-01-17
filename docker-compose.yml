@@ -21,6 +21,11 @@ services:
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: kafka-topics --bootstrap-server localhost:9092 --list
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   kafka-init:
     image: confluentinc/cp-kafka:7.4.4
@@ -82,11 +87,15 @@ services:
     volumes:
       - ./service/sensor_earthquake/main.py:/opt/program/main.py
       - ./service/sensor_earthquake/earthquake_activity.py:/opt/program/earthquake_activity.py
+      - ./service/kafka_client.py:/opt/program/kafka_client.py
     environment:
       - PYTHONBUFFERED=1
-      - STAGE="prod"
+      - STAGE=dev
     depends_on:
-      - warehouse
+      kafka:
+        condition: service_healthy
+      warehouse:
+        condition: service_healthy
     command: python3 -u /opt/program/main.py
 
   sensor_tectonic_stress:
@@ -99,9 +108,12 @@ services:
       - ./service/sensor_tectonic_stress/tectonic_stress_activity.py:/opt/program/tectonic_stress_activity.py
     environment:
       - PYTHONBUFFERED=1
-      - STAGE="prod"
+      - STAGE=dev
     depends_on:
-      - warehouse
+      kafka:
+        condition: service_healthy
+      warehouse:
+        condition: service_healthy
     command: python3 -u /opt/program/main.py
 
   pipeline_tests:
@@ -115,6 +127,8 @@ services:
     environment:
       - STAGE="dev"
     depends_on:
+      kafka:
+        condition: service_healthy
       warehouse:
         condition: service_healthy
     command: bash /opt/program/tests.sh

@@ -28,4 +28,4 @@ if __name__ == '__main__':
         producer = create_producer()
         activity = generate_activity()
         send_activity(producer, str(activity))
-        time.sleep(int(random.uniform(60, 120)))
+        time.sleep(int(random.uniform(2, 10)))

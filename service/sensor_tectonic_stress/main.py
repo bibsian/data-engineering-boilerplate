@@ -2,7 +2,7 @@ import os
 import random
 import time
 
-#from kafka_client import create_producer, TOPIC_STR
+from kafka_client import create_producer, TOPIC_STAGE
 from tectonic_stress_activity import TectonicStressActivity
 
 
@@ -14,14 +14,14 @@ def generate_activity():
 
 def send_activity(producer, activity_str):
     print('>> Tectonic stress activity is ready to send')
-    #producer.send(f'tectonic-stress-raw-{TOPIC_STR}', value=activity_str)
-    #producer.flush()
+    producer.send(f'tectonic-stress-raw-{TOPIC_STAGE}', value=activity_str)
+    producer.flush()
     print('>> Tectonic stress captured')
     return
 
 if __name__ == '__main__':
     while True:
-        #producer = create_producer()
+        producer = create_producer()
         activity = generate_activity()
-        send_activity(None, str(activity))
+        send_activity(producer, str(activity))
         time.sleep(1)
