@@ -1,4 +1,3 @@
-version: '3'
 services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.4.4
@@ -106,6 +105,7 @@ services:
     volumes:
       - ./service/sensor_tectonic_stress/main.py:/opt/program/main.py
       - ./service/sensor_tectonic_stress/tectonic_stress_activity.py:/opt/program/tectonic_stress_activity.py
+      - ./service/kafka_client.py:/opt/program/kafka_client.py
     environment:
       - PYTHONBUFFERED=1
       - STAGE=dev

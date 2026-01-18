@@ -140,33 +140,50 @@ wheels = [
 [[package]]
 name = "data-engineering-boilerplate"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
-    { name = "iniconfig" },
     { name = "kafka-python" },
     { name = "minio" },
-    { name = "packaging" },
-    { name = "pluggy" },
     { name = "psycopg2-binary" },
-    { name = "pygments" },
-    { name = "pytest" },
     { name = "sqlalchemy" },
     { name = "typing-extensions" },
 ]
 
+[package.optional-dependencies]
+dev = [
+    { name = "iniconfig" },
+    { name = "packaging" },
+    { name = "pluggy" },
+    { name = "pygments" },
+    { name = "pytest" },
+]
+test = [
+    { name = "iniconfig" },
+    { name = "packaging" },
+    { name = "pluggy" },
+    { name = "pygments" },
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
-    { name = "iniconfig", specifier = "==2.3.0" },
+    { name = "iniconfig", marker = "extra == 'dev'", specifier = "==2.3.0" },
+    { name = "iniconfig", marker = "extra == 'test'", specifier = "==2.3.0" },
     { name = "kafka-python", specifier = "==2.3.0" },
     { name = "minio", specifier = ">=7.2.20" },
-    { name = "packaging", specifier = "==25.0" },
-    { name = "pluggy", specifier = "==1.6.0" },
+    { name = "packaging", marker = "extra == 'dev'", specifier = "==25.0" },
+    { name = "packaging", marker = "extra == 'test'", specifier = "==25.0" },
+    { name = "pluggy", marker = "extra == 'dev'", specifier = "==1.6.0" },
+    { name = "pluggy", marker = "extra == 'test'", specifier = "==1.6.0" },
     { name = "psycopg2-binary", specifier = "==2.9.11" },
-    { name = "pygments", specifier = "==2.19.2" },
-    { name = "pytest", specifier = "==9.0.2" },
+    { name = "pygments", marker = "extra == 'dev'", specifier = "==2.19.2" },
+    { name = "pygments", marker = "extra == 'test'", specifier = "==2.19.2" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = "==9.0.2" },
+    { name = "pytest", marker = "extra == 'test'", specifier = "==9.0.2" },
     { name = "sqlalchemy", specifier = "==2.0.45" },
     { name = "typing-extensions", specifier = "==4.15.0" },
 ]
+provides-extras = ["test", "dev"]
 
 [[package]]
 name = "greenlet"
