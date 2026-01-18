@@ -1,0 +1,33 @@
+[project]
+name = "data-engineering-boilerplate"
+version = "0.1.0"
+description = "Data Engineering Boilerplate with Kafka, MinIO, and PostgreSQL"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "kafka-python==2.3.0",
+    "minio>=7.2.20",
+    "psycopg2-binary==2.9.11",
+    "sqlalchemy==2.0.45",
+    "typing-extensions==4.15.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest==9.0.2",
+    "iniconfig==2.3.0",
+    "packaging==25.0",
+    "pluggy==1.6.0",
+    "pygments==2.19.2",
+]
+dev = [
+    "pytest==9.0.2",
+    "iniconfig==2.3.0",
+    "packaging==25.0",
+    "pluggy==1.6.0",
+    "pygments==2.19.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

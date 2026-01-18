@@ -2,3 +2,10 @@
 __pycache__
 *DS_Store
 *.idea
+*#
+.envrc
+.python-version
+node_modules/*
+package-lock.json
+package.json
+main.py

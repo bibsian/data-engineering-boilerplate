@@ -1,8 +1,71 @@
-version: '3'
 services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.4
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 22181:2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.4
+    depends_on:
+      - zookeeper
+    ports:
+      - 29092:29092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: kafka-topics --bootstrap-server localhost:9092 --list
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka-init:
+    image: confluentinc/cp-kafka:7.4.4
+    depends_on:
+      - kafka
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      "
+      # Wait for Kafka to be ready
+      until kafka-topics --bootstrap-server kafka:9092 --list > /dev/null 2>&1; do
+        echo 'waiting for Kafka...'
+        sleep 2
+      done
+      
+      # Create topics
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic earthquake-raw-dev --partitions 1 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic earthquake-raw-prod --partitions 1 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tectonic-stress-raw-dev --partitions 1 --replication-factor 1
+      kafka-topics --bootstrap-server kafka:9092 --create --if-not-exists --topic tectonic-stress-raw-prod --partitions 1 --replication-factor 1
+      "
+
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
   warehouse:
     container_name: warehouse # prevents docker-compose name prefixing\
     image: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     ports:
       - "5432:5432"
     environment:
@@ -23,11 +86,15 @@ services:
     volumes:
       - ./service/sensor_earthquake/main.py:/opt/program/main.py
       - ./service/sensor_earthquake/earthquake_activity.py:/opt/program/earthquake_activity.py
+      - ./service/kafka_client.py:/opt/program/kafka_client.py
     environment:
       - PYTHONBUFFERED=1
-      - STAGE="prod"
+      - STAGE=dev
     depends_on:
-      - warehouse
+      kafka:
+        condition: service_healthy
+      warehouse:
+        condition: service_healthy
     command: python3 -u /opt/program/main.py
 
   sensor_tectonic_stress:
@@ -38,11 +105,15 @@ services:
     volumes:
       - ./service/sensor_tectonic_stress/main.py:/opt/program/main.py
       - ./service/sensor_tectonic_stress/tectonic_stress_activity.py:/opt/program/tectonic_stress_activity.py
+      - ./service/kafka_client.py:/opt/program/kafka_client.py
     environment:
       - PYTHONBUFFERED=1
-      - STAGE="prod"
+      - STAGE=dev
     depends_on:
-      - warehouse
+      kafka:
+        condition: service_healthy
+      warehouse:
+        condition: service_healthy
     command: python3 -u /opt/program/main.py
 
   pipeline_tests:
@@ -56,9 +127,14 @@ services:
     environment:
       - STAGE="dev"
     depends_on:
-      - warehouse
+      kafka:
+        condition: service_healthy
+      warehouse:
+        condition: service_healthy
     command: bash /opt/program/tests.sh
     #privileged: true
     #tty: true
-    #entrypoint: ['bash']
+    #entrypoint: ["/bin/bash"]
 
+volumes:
+  minio_data:

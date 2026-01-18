@@ -1,11 +1,22 @@
-FROM python:3.6
+FROM ghcr.io/astral-sh/uv:python3.14-alpine
 
-ENV path="/opt/program"
+# Copy uv binary from official image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-COPY ./service $path
-COPY ./service/sensor_tectonic_stress $path
+ENV PATH="/opt/program:$PATH"
+ENV PYTHONPATH="/opt/program:$PYTHONPATH"
 
-# Would install through git
-RUN pip install -r $path/requirements.txt
+WORKDIR /opt/program
 
-WORKDIR $path
+# Copy project files for dependency resolution
+COPY pyproject.toml uv.lock ./
+
+# Install dependencies using uv
+RUN uv pip install --system -r pyproject.toml
+
+# Copy service-specific files
+COPY ./service/kafka_client.py ./
+COPY ./service/sensor_tectonic_stress/ ./
+
+# Copy shared service files
+COPY ./service/db.py ./service/lake.py ./service/stream_handles.py ./

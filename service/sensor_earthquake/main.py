@@ -1,10 +1,10 @@
+import json
 import os
 import random
 import time
 
 from earthquake_activity import EarthquakeActivity
-#from db import create_engine
-#from stream_handles import EarthquakeStream
+from kafka_client import create_producer, TOPIC_STAGE
 
 
 def generate_activity():
@@ -16,15 +16,16 @@ def generate_activity():
     )
 
 
-# TODO: implement this based on your architecture
-def send_activity(activity_str):
+def send_activity(producer, activity_str):
     print('>> Earthquake activity is ready to send')
-    #handler = EarthquakeStream(ENGINE)
-    #processed = handler.process(activity)
-    #print('>> Earthquake activity captured')
+    producer.send(f'earthquake-raw-{TOPIC_STAGE}', value=activity_str)
+    producer.flush()
+    print('>> Earthquake activity captured')
+    return True
 
 if __name__ == '__main__':
     while True:
+        producer = create_producer()
         activity = generate_activity()
-        send_activity(str(activity))
+        send_activity(producer, str(activity))
         time.sleep(int(random.uniform(2, 10)))
