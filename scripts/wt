@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# wt — git worktree helper
+# Usage: wt <create|list|switch|delete> [args]
+
+set -euo pipefail
+
+# Always resolve to the main worktree root, even when called from a linked worktree.
+# git rev-parse --show-toplevel returns the *current* worktree root, which is wrong
+# when we're inside a linked worktree. git worktree list always lists main first.
+REPO_ROOT="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree/{print $2; exit}')"
+if [[ -z "$REPO_ROOT" ]]; then
+  echo "Error: not inside a git repo" >&2; exit 1
+fi
+WORKTREES_DIR="$REPO_ROOT/.claude/worktrees"
+
+usage() {
+  cat >&2 <<EOF
+Usage: wt <command> [args]
+
+Commands:
+  create <branch> [--go]   Create a worktree; --go also cd's in and launches claude
+  list                     List all worktrees
+  switch <branch>          cd into a worktree (requires shell wrapper)
+  delete <branch>          Remove worktree and delete its local branch
+
+Shell integration (add to ~/.zshrc or ~/.bashrc):
+  wt() {
+    local out status
+  
+    # Run the actual wt script and capture its stdout into $out
+    out="$(command wt "$@")"
+  
+    # Save the exit code (0 = success, nonzero = error)
+    status=$?
+  
+    # Does the output start with "EVAL:"?
+    if [[ "$out" == EVAL:* ]]; then
+      # Yes — strip the "EVAL:" prefix and execute the rest
+      # ${out#EVAL:} means "remove 'EVAL:' from the front of $out"
+      eval "${out#EVAL:}"
+    else
+      # No — just print the output normally
+      [[ -n "$out" ]] && echo "$out"
+    fi
+  
+    return $status
+  }
+  EOF
+}
+
+wt_create() {
+  local go_flag=0 branch="" arg
+
+  # Position-independent --go parsing
+  for arg in "$@"; do
+    if [[ "$arg" == "--go" ]]; then
+      go_flag=1
+    elif [[ -z "$branch" ]]; then
+      branch="$arg"
+    else
+      echo "wt create: unexpected argument: $arg" >&2; exit 1
+    fi
+  done
+
+  if [[ -z "$branch" ]]; then
+    echo "Usage: wt create <branch> [--go]" >&2; exit 1
+  fi
+
+  local dest="$WORKTREES_DIR/$branch"
+  if [[ -d "$dest" ]]; then
+    echo "Error: worktree already exists at $dest" >&2; exit 1
+  fi
+
+  # dirname handles nested paths like project/new-branch;
+  # for flat names dirname returns $WORKTREES_DIR (already exists — mkdir -p is a no-op)
+  mkdir -p "$(dirname "$dest")"
+
+  if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
+    # Branch exists locally — check it out into the new worktree
+    git -C "$REPO_ROOT" worktree add "$dest" "$branch"
+  elif git -C "$REPO_ROOT" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
+    # Branch exists on origin but not locally — create local tracking branch
+    git -C "$REPO_ROOT" worktree add "$dest" -b "$branch" "origin/$branch"
+  else
+    # Brand new branch
+    git -C "$REPO_ROOT" worktree add -b "$branch" "$dest"
+  fi
+
+  if [[ "$go_flag" == 1 ]]; then
+    if ! command -v claude &>/dev/null; then
+      echo "wt create: --go requires 'claude' on PATH (not found)" >&2
+      echo "Worktree created at: $dest" >&2
+      exit 1
+    fi
+    # EVAL: sentinel — wrapper strips prefix and evals the rest
+    printf 'EVAL:cd %s && claude\n' "$(printf '%q' "$dest")"
+  else
+    echo "Created worktree: $dest"
+    echo "  Branch: $branch"
+    echo "  Run: wt switch $branch"
+  fi
+}
+
+wt_list() {
+  git -C "$REPO_ROOT" worktree list
+}
+
+wt_switch() {
+  local branch="${1:-}"
+  if [[ -z "$branch" ]]; then
+    echo "Error: branch name required" >&2
+    echo "Usage: wt switch <branch>" >&2
+    exit 1
+  fi
+  local dest="$WORKTREES_DIR/$branch"
+  if [[ ! -d "$dest" ]]; then
+    echo "Error: no worktree for branch '$branch' at $dest" >&2
+    echo "Run 'wt list' to see available worktrees" >&2
+    exit 1
+  fi
+  # EVAL: sentinel — wrapper strips prefix and evals the rest.
+  # printf %q safely quotes the path even if it contains spaces.
+  printf 'EVAL:cd %q\n' "$dest"
+}
+
+wt_delete() {
+  local branch="${1:-}"
+  if [[ -z "$branch" ]]; then
+    echo "Error: branch name required" >&2
+    echo "Usage: wt delete <branch>" >&2
+    exit 1
+  fi
+  local dest="$WORKTREES_DIR/$branch"
+  if [[ ! -d "$dest" ]]; then
+    echo "Error: no worktree for branch '$branch' at $dest" >&2
+    exit 1
+  fi
+  # Check current directory isn't inside the worktree we're deleting.
+  # Use "$dest"/* (with slash) to avoid matching /foo/barbaz when dest is /foo/bar.
+  local current
+  current="$(pwd)"
+  if [[ "$current" == "$dest" || "$current" == "$dest"/* ]]; then
+    echo "Error: you are currently inside '$dest'" >&2
+    echo "Switch to another worktree first: wt switch <other-branch>" >&2
+    exit 1
+  fi
+  # worktree remove fails if the worktree has uncommitted changes.
+  if ! git -C "$REPO_ROOT" worktree remove "$dest"; then
+    echo "Error: worktree has uncommitted changes." >&2
+    echo "Commit or stash them first, or run: git -C '$dest' checkout -- ." >&2
+    exit 1
+  fi
+  # Use -d (safe delete) — it refuses to delete unmerged branches.
+  # Do NOT fall through to -D: silently force-deleting destroys unmerged work.
+  if ! git -C "$REPO_ROOT" branch -d "$branch" 2>/dev/null; then
+    echo "Warning: branch '$branch' was not deleted (unmerged commits or remote-only)." >&2
+    echo "  To force delete: git branch -D $branch" >&2
+  fi
+  echo "Deleted worktree: $branch"
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  create) wt_create "$@" ;;
+  list)   wt_list ;;
+  switch) wt_switch "$@" ;;
+  delete) wt_delete "$@" ;;
+  *)      usage; exit 1 ;;
+esac
