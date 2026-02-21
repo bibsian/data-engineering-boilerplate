@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# wt — git worktree helper
+# Usage: wt <create|list|switch|delete> [args]
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || { echo "Error: not inside a git repo" >&2; exit 1; })"
+WORKTREES_DIR="$REPO_ROOT/.claude/worktrees"
+
+usage() {
+  cat >&2 <<EOF
+Usage: wt <command> [args]
+
+Commands:
+  create <branch> [--go]   Create a worktree; --go also cd's in and launches claude
+  list                     List all worktrees
+  switch <branch>          cd into a worktree (requires shell wrapper)
+  delete <branch>          Remove worktree and delete its local branch
+
+Shell integration (add to ~/.zshrc or ~/.bashrc):
+  wt() {
+    local out status
+    out="\$(command wt "\$@")"
+    status=\$?
+    if [[ "\$out" == EVAL:* ]]; then eval "\${out#EVAL:}"; else [[ -n "\$out" ]] && echo "\$out"; fi
+    return \$status
+  }
+EOF
+}
+
+cmd="${1:-}"
+shift || true
+
+case "$cmd" in
+  create) wt_create "$@" ;;
+  list)   wt_list ;;
+  switch) wt_switch "$@" ;;
+  delete) wt_delete "$@" ;;
+  *)      usage; exit 1 ;;
+esac
