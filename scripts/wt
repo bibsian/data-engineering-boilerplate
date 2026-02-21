@@ -85,6 +85,24 @@ wt_list() {
   git -C "$REPO_ROOT" worktree list
 }
 
+wt_switch() {
+  local branch="${1:-}"
+  if [[ -z "$branch" ]]; then
+    echo "Error: branch name required" >&2
+    echo "Usage: wt switch <branch>" >&2
+    exit 1
+  fi
+  local dest="$WORKTREES_DIR/$branch"
+  if [[ ! -d "$dest" ]]; then
+    echo "Error: no worktree for branch '$branch' at $dest" >&2
+    echo "Run 'wt list' to see available worktrees" >&2
+    exit 1
+  fi
+  # EVAL: sentinel — wrapper strips prefix and evals the rest.
+  # printf %q safely quotes the path even if it contains spaces.
+  printf 'EVAL:cd %q\n' "$dest"
+}
+
 cmd="${1:-}"
 shift || true
 
