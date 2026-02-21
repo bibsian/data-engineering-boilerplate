@@ -28,6 +28,63 @@ Shell integration (add to ~/.zshrc or ~/.bashrc):
 EOF
 }
 
+wt_create() {
+  local go_flag=0 branch="" arg
+
+  # Position-independent --go parsing
+  for arg in "$@"; do
+    if [[ "$arg" == "--go" ]]; then
+      go_flag=1
+    elif [[ -z "$branch" ]]; then
+      branch="$arg"
+    else
+      echo "wt create: unexpected argument: $arg" >&2; exit 1
+    fi
+  done
+
+  if [[ -z "$branch" ]]; then
+    echo "Usage: wt create <branch> [--go]" >&2; exit 1
+  fi
+
+  local dest="$WORKTREES_DIR/$branch"
+  if [[ -d "$dest" ]]; then
+    echo "Error: worktree already exists at $dest" >&2; exit 1
+  fi
+
+  # dirname handles nested paths like project/new-branch;
+  # for flat names dirname returns $WORKTREES_DIR (already exists — mkdir -p is a no-op)
+  mkdir -p "$(dirname "$dest")"
+
+  if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
+    # Branch exists locally — check it out into the new worktree
+    git -C "$REPO_ROOT" worktree add "$dest" "$branch"
+  elif git -C "$REPO_ROOT" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
+    # Branch exists on origin but not locally — create local tracking branch
+    git -C "$REPO_ROOT" worktree add "$dest" -b "$branch" "origin/$branch"
+  else
+    # Brand new branch
+    git -C "$REPO_ROOT" worktree add -b "$branch" "$dest"
+  fi
+
+  if [[ "$go_flag" == 1 ]]; then
+    if ! command -v claude &>/dev/null; then
+      echo "wt create: --go requires 'claude' on PATH (not found)" >&2
+      echo "Worktree created at: $dest" >&2
+      exit 1
+    fi
+    # EVAL: sentinel — wrapper strips prefix and evals the rest
+    printf 'EVAL:cd %s && claude\n' "$(printf '%q' "$dest")"
+  else
+    echo "Created worktree: $dest"
+    echo "  Branch: $branch"
+    echo "  Run: wt switch $branch"
+  fi
+}
+
+wt_list() {
+  git -C "$REPO_ROOT" worktree list
+}
+
 cmd="${1:-}"
 shift || true
 
