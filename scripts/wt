@@ -126,7 +126,59 @@ wt_create() {
 }
 
 wt_list() {
-  git -C "$REPO_ROOT" worktree list
+  local on_status="$REPO_ROOT/.wt/hooks/on-status.sh"
+
+  # Fall back to plain git output when no hook is present
+  if [[ ! -f "$on_status" ]]; then
+    git -C "$REPO_ROOT" worktree list
+    return 0
+  fi
+
+  # Source config for NAMESPACE_PREFIX
+  local wt_config="$REPO_ROOT/.wt/config.sh"
+  [[ -f "$wt_config" ]] && source "$wt_config"
+  local ns_prefix="${NAMESPACE_PREFIX:-wt}"
+
+  # Get header row from hook
+  local header
+  header="$(bash "$on_status" --header)"
+
+  # Parse 'git worktree list --porcelain' into parallel arrays
+  local -a wt_paths=() wt_branches=()
+  local _path="" _branch=""
+
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *) _path="${line#worktree }" ;;
+      branch\ *)   _branch="${line#branch refs/heads/}" ;;
+      "")
+        if [[ -n "$_path" ]]; then
+          wt_paths+=("$_path")
+          wt_branches+=("${_branch:-HEAD}")
+          _path="" _branch=""
+        fi
+        ;;
+    esac
+  done < <(git -C "$REPO_ROOT" worktree list --porcelain; printf '\n')
+
+  # Build and print table
+  {
+    printf '%s\n' "$header"
+    local i
+    for i in "${!wt_paths[@]}"; do
+      local wt_name ns
+      wt_name="$(wt_sanitize "${wt_branches[$i]}")"
+      ns="${ns_prefix}-${wt_name}"
+      (
+        export WT_NAME="$wt_name"
+        export WT_BRANCH="${wt_branches[$i]}"
+        export WT_NAMESPACE="$ns"
+        export WT_PATH="${wt_paths[$i]}"
+        export WT_REPO_ROOT="$REPO_ROOT"
+        bash "$on_status"
+      )
+    done
+  } | column -t -s $'\t'
 }
 
 wt_switch() {
