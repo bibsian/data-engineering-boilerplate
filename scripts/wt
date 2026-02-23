@@ -63,13 +63,13 @@ wt_create() {
 
   if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
     # Branch exists locally — check it out into the new worktree
-    git -C "$REPO_ROOT" worktree add "$dest" "$branch"
+    git -C "$REPO_ROOT" worktree add "$dest" "$branch" >&2
   elif git -C "$REPO_ROOT" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
     # Branch exists on origin but not locally — create local tracking branch
-    git -C "$REPO_ROOT" worktree add "$dest" -b "$branch" "origin/$branch"
+    git -C "$REPO_ROOT" worktree add "$dest" -b "$branch" "origin/$branch" >&2
   else
     # Brand new branch
-    git -C "$REPO_ROOT" worktree add -b "$branch" "$dest"
+    git -C "$REPO_ROOT" worktree add -b "$branch" "$dest" >&2
   fi
 
   if [[ "$go_flag" == 1 ]]; then
