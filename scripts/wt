@@ -50,7 +50,6 @@ EOF
 wt_create() {
   local go_flag=0 branch="" arg
 
-  # Position-independent --go parsing
   for arg in "$@"; do
     if [[ "$arg" == "--go" ]]; then
       go_flag=1
@@ -70,20 +69,47 @@ wt_create() {
     echo "Error: worktree already exists at $dest" >&2; exit 1
   fi
 
-  # dirname handles nested paths like project/new-branch;
-  # for flat names dirname returns $WORKTREES_DIR (already exists — mkdir -p is a no-op)
   mkdir -p "$(dirname "$dest")"
 
   if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
-    # Branch exists locally — check it out into the new worktree
     git -C "$REPO_ROOT" worktree add "$dest" "$branch" >&2
   elif git -C "$REPO_ROOT" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
-    # Branch exists on origin but not locally — create local tracking branch
     git -C "$REPO_ROOT" worktree add "$dest" -b "$branch" "origin/$branch" >&2
   else
-    # Brand new branch
     git -C "$REPO_ROOT" worktree add -b "$branch" "$dest" >&2
   fi
+
+  # ── k8s/hook integration ────────────────────────────────────────────────
+  local wt_config="$REPO_ROOT/.wt/config.sh"
+  if [[ -f "$wt_config" ]]; then
+    local wt_name wt_namespace
+    wt_name="$(wt_sanitize "$branch")"
+
+    # Source config to pick up NAMESPACE_PREFIX (and other vars for the hook)
+    # shellcheck source=.wt/config.sh
+    source "$wt_config"
+    local ns_prefix="${NAMESPACE_PREFIX:-wt}"
+    wt_namespace="${ns_prefix}-${wt_name}"
+
+    echo "Creating k8s namespace: $wt_namespace" >&2
+    kubectl create namespace "$wt_namespace" \
+      --dry-run=client -o yaml | kubectl apply -f - >&2
+
+    local on_create="$REPO_ROOT/.wt/hooks/on-create.sh"
+    if [[ -f "$on_create" ]]; then
+      export WT_NAME="$wt_name"
+      export WT_BRANCH="$branch"
+      export WT_NAMESPACE="$wt_namespace"
+      export WT_PATH="$dest"
+      export WT_REPO_ROOT="$REPO_ROOT"
+      echo "Running on-create hook..." >&2
+      if ! bash "$on_create"; then
+        echo "Error: on-create hook failed — aborting." >&2
+        exit 1
+      fi
+    fi
+  fi
+  # ────────────────────────────────────────────────────────────────────────
 
   if [[ "$go_flag" == 1 ]]; then
     if ! command -v claude &>/dev/null; then
@@ -91,7 +117,6 @@ wt_create() {
       echo "Worktree created at: $dest" >&2
       exit 1
     fi
-    # EVAL: sentinel — wrapper strips prefix and evals the rest
     printf 'EVAL:cd %s && claude\n' "$(printf '%q' "$dest")"
   else
     echo "Created worktree: $dest"
