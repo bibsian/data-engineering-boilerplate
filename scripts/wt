@@ -220,6 +220,34 @@ wt_delete() {
     echo "Switch to another worktree first: wt switch <other-branch>" >&2
     exit 1
   fi
+  # ── k8s/hook integration ────────────────────────────────────────────────
+  local wt_config="$REPO_ROOT/.wt/config.sh"
+  if [[ -f "$wt_config" ]]; then
+    local wt_name wt_namespace
+    wt_name="$(wt_sanitize "$branch")"
+    # shellcheck source=.wt/config.sh
+    source "$wt_config"
+    local ns_prefix="${NAMESPACE_PREFIX:-wt}"
+    wt_namespace="${ns_prefix}-${wt_name}"
+
+    local on_delete="$REPO_ROOT/.wt/hooks/on-delete.sh"
+    if [[ -f "$on_delete" ]]; then
+      export WT_NAME="$wt_name"
+      export WT_BRANCH="$branch"
+      export WT_NAMESPACE="$wt_namespace"
+      export WT_PATH="$dest"
+      export WT_REPO_ROOT="$REPO_ROOT"
+      echo "Running on-delete hook..." >&2
+      if ! bash "$on_delete"; then
+        echo "Error: on-delete hook failed — aborting." >&2
+        exit 1
+      fi
+    fi
+
+    echo "Deleting k8s namespace: $wt_namespace" >&2
+    kubectl delete namespace "$wt_namespace" --ignore-not-found >&2
+  fi
+  # ────────────────────────────────────────────────────────────────────────
   # worktree remove fails if the worktree has uncommitted changes.
   if ! git -C "$REPO_ROOT" worktree remove "$dest"; then
     echo "Error: worktree has uncommitted changes." >&2
