@@ -13,6 +13,18 @@ if [[ -z "$REPO_ROOT" ]]; then
 fi
 WORKTREES_DIR="$REPO_ROOT/.claude/worktrees"
 
+# Sanitize a git branch name for use as a k8s name segment.
+# earl/FIB-123 → earl-fib-123
+wt_sanitize() {
+  local branch="$1"
+  printf '%s' "$branch" \
+    | tr '[:upper:]' '[:lower:]' \
+    | tr '/_ ' '-' \
+    | tr -cd 'a-z0-9-' \
+    | sed -E 's/-{2,}/-/g' \
+    | sed -E 's/^-+//;s/-+$//'
+}
+
 usage() {
   cat >&2 <<EOF
 Usage: wt <command> [args]
@@ -22,6 +34,7 @@ Commands:
   list                     List all worktrees
   switch <branch>          cd into a worktree (requires shell wrapper)
   delete <branch>          Remove worktree and delete its local branch
+  init                     Scaffold .wt/ config and hooks for this project
 
 Shell integration (add to ~/.zshrc or ~/.bashrc):
   wt() {
@@ -153,5 +166,6 @@ case "$cmd" in
   list)   wt_list ;;
   switch) wt_switch "$@" ;;
   delete) wt_delete "$@" ;;
+  init)   wt_init ;;
   *)      usage; exit 1 ;;
 esac
