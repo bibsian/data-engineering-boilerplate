@@ -1,0 +1,35 @@
+{{- range .Values.sensors }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ .name }}
+    type: sensor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .name }}
+        type: sensor
+    spec:
+      containers:
+        - name: {{ .name }}
+          image: "{{ .name }}:{{ $.Values.worktreeName }}"
+          command: {{ toJson .command }}
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka.{{ $.Values.infraNamespace }}.svc.cluster.local:9092"
+            - name: MINIO_ENDPOINT
+              value: "minio.{{ $.Values.infraNamespace }}.svc.cluster.local:9000"
+            - name: DATABASE_HOST
+              value: "warehouse.{{ $.Values.infraNamespace }}.svc.cluster.local"
+            - name: DATABASE_NAME
+              value: {{ $.Values.dbName | quote }}
+{{- end }}

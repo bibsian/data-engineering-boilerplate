@@ -1,0 +1,4 @@
+apiVersion: v2
+name: worktree
+description: Per-worktree data pipeline services
+version: 0.1.0
