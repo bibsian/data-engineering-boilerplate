@@ -25,25 +25,11 @@ Commands:
 
 Shell integration (add to ~/.zshrc or ~/.bashrc):
   wt() {
-    local out status
-  
-    # Run the actual wt script and capture its stdout into $out
+    local out ret
     out="$(command wt "$@")"
-  
-    # Save the exit code (0 = success, nonzero = error)
-    status=$?
-  
-    # Does the output start with "EVAL:"?
-    if [[ "$out" == EVAL:* ]]; then
-      # Yes — strip the "EVAL:" prefix and execute the rest
-      # ${out#EVAL:} means "remove 'EVAL:' from the front of $out"
-      eval "${out#EVAL:}"
-    else
-      # No — just print the output normally
-      [[ -n "$out" ]] && echo "$out"
-    fi
-  
-    return $status
+    ret=$?
+    if [[ "$out" == EVAL:* ]]; then eval "${out#EVAL:}"; else [[ -n "$out" ]] && echo "$out"; fi
+    return $ret
   }
   EOF
 }
