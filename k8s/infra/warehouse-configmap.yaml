@@ -1,0 +1,34 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: warehouse-init
+  namespace: infra
+data:
+  tables.sql: |
+    SET TIME ZONE 'UTC';
+
+    CREATE TABLE earthquake_activity (
+        id BIGSERIAL PRIMARY KEY NOT NULL,
+        raw JSONB NOT NULL,
+        dt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+
+    CREATE TABLE sensor_tectonic_stress (
+        id BIGSERIAL PRIMARY KEY NOT NULL,
+        raw JSONB NOT NULL,
+        dt TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+
+    CREATE TABLE earthquake_activity_with_stress (
+        id BIGSERIAL PRIMARY KEY NOT NULL,
+        raw JSONB NOT NULL,
+        dt TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        average_tectonic_stress_magnitude FLOAT,
+        dt_ingested_prev_catostrophic TIMESTAMP WITH TIME ZONE,
+        dt_recorded_prev_catastrophic TIMESTAMP
+    );
+  config.sh: |
+    #!/bin/bash
+    createdb -U postgres earthquakes_dev &&
+    psql -U postgres -d earthquakes_prod -f /opt/program/tables.sql &&
+        psql -U postgres -d earthquakes_dev -f /opt/program/tables.sql
