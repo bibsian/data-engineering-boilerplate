@@ -1,0 +1,22 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pipeline-tests
+  namespace: {{ .Release.Namespace }}
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: pipeline-tests
+          image: "pipeline-tests:{{ .Values.worktreeName }}"
+          env:
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka.{{ .Values.infraNamespace }}.svc.cluster.local:9092"
+            - name: MINIO_ENDPOINT
+              value: "minio.{{ .Values.infraNamespace }}.svc.cluster.local:9000"
+            - name: DATABASE_HOST
+              value: "warehouse.{{ .Values.infraNamespace }}.svc.cluster.local"
+            - name: DATABASE_NAME
+              value: {{ .Values.dbName | quote }}

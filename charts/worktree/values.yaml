@@ -1,0 +1,10 @@
+worktreeName: ""
+branch: ""
+infraNamespace: "infra"
+dbName: ""
+
+sensors:
+  - name: sensor-earthquake
+    command: ["python3", "-u", "/opt/program/main.py"]
+  - name: sensor-tectonic-stress
+    command: ["python3", "-u", "/opt/program/main.py"]

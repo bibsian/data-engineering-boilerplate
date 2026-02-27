@@ -13,6 +13,18 @@ if [[ -z "$REPO_ROOT" ]]; then
 fi
 WORKTREES_DIR="$REPO_ROOT/.claude/worktrees"
 
+# Sanitize a git branch name for use as a k8s name segment.
+# earl/FIB-123 → earl-fib-123
+wt_sanitize() {
+  local branch="$1"
+  printf '%s' "$branch" \
+    | tr '[:upper:]' '[:lower:]' \
+    | tr '/_ ' '-' \
+    | tr -cd 'a-z0-9-' \
+    | sed -E 's/-{2,}/-/g' \
+    | sed -E 's/^-+//;s/-+$//'
+}
+
 usage() {
   cat >&2 <<EOF
 Usage: wt <command> [args]
@@ -22,6 +34,7 @@ Commands:
   list                     List all worktrees
   switch <branch>          cd into a worktree (requires shell wrapper)
   delete <branch>          Remove worktree and delete its local branch
+  init                     Scaffold .wt/ config and hooks for this project
 
 Shell integration (add to ~/.zshrc or ~/.bashrc):
   wt() {
@@ -37,7 +50,6 @@ EOF
 wt_create() {
   local go_flag=0 branch="" arg
 
-  # Position-independent --go parsing
   for arg in "$@"; do
     if [[ "$arg" == "--go" ]]; then
       go_flag=1
@@ -57,20 +69,47 @@ wt_create() {
     echo "Error: worktree already exists at $dest" >&2; exit 1
   fi
 
-  # dirname handles nested paths like project/new-branch;
-  # for flat names dirname returns $WORKTREES_DIR (already exists — mkdir -p is a no-op)
   mkdir -p "$(dirname "$dest")"
 
   if git -C "$REPO_ROOT" show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
-    # Branch exists locally — check it out into the new worktree
     git -C "$REPO_ROOT" worktree add "$dest" "$branch" >&2
   elif git -C "$REPO_ROOT" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
-    # Branch exists on origin but not locally — create local tracking branch
     git -C "$REPO_ROOT" worktree add "$dest" -b "$branch" "origin/$branch" >&2
   else
-    # Brand new branch
     git -C "$REPO_ROOT" worktree add -b "$branch" "$dest" >&2
   fi
+
+  # ── k8s/hook integration ────────────────────────────────────────────────
+  local wt_config="$REPO_ROOT/.wt/config.sh"
+  if [[ -f "$wt_config" ]]; then
+    local wt_name wt_namespace
+    wt_name="$(wt_sanitize "$branch")"
+
+    # Source config to pick up NAMESPACE_PREFIX (and other vars for the hook)
+    # shellcheck source=.wt/config.sh
+    source "$wt_config"
+    local ns_prefix="${NAMESPACE_PREFIX:-wt}"
+    wt_namespace="${ns_prefix}-${wt_name}"
+
+    echo "Creating k8s namespace: $wt_namespace" >&2
+    kubectl create namespace "$wt_namespace" \
+      --dry-run=client -o yaml | kubectl apply -f - >&2
+
+    local on_create="$REPO_ROOT/.wt/hooks/on-create.sh"
+    if [[ -f "$on_create" ]]; then
+      export WT_NAME="$wt_name"
+      export WT_BRANCH="$branch"
+      export WT_NAMESPACE="$wt_namespace"
+      export WT_PATH="$dest"
+      export WT_REPO_ROOT="$REPO_ROOT"
+      echo "Running on-create hook..." >&2
+      if ! bash "$on_create"; then
+        echo "Error: on-create hook failed — aborting." >&2
+        exit 1
+      fi
+    fi
+  fi
+  # ────────────────────────────────────────────────────────────────────────
 
   if [[ "$go_flag" == 1 ]]; then
     if ! command -v claude &>/dev/null; then
@@ -78,7 +117,6 @@ wt_create() {
       echo "Worktree created at: $dest" >&2
       exit 1
     fi
-    # EVAL: sentinel — wrapper strips prefix and evals the rest
     printf 'EVAL:cd %s && claude\n' "$(printf '%q' "$dest")"
   else
     echo "Created worktree: $dest"
@@ -88,7 +126,59 @@ wt_create() {
 }
 
 wt_list() {
-  git -C "$REPO_ROOT" worktree list
+  local on_status="$REPO_ROOT/.wt/hooks/on-status.sh"
+
+  # Fall back to plain git output when no hook is present
+  if [[ ! -f "$on_status" ]]; then
+    git -C "$REPO_ROOT" worktree list
+    return 0
+  fi
+
+  # Source config for NAMESPACE_PREFIX
+  local wt_config="$REPO_ROOT/.wt/config.sh"
+  [[ -f "$wt_config" ]] && source "$wt_config"
+  local ns_prefix="${NAMESPACE_PREFIX:-wt}"
+
+  # Get header row from hook
+  local header
+  header="$(bash "$on_status" --header)"
+
+  # Parse 'git worktree list --porcelain' into parallel arrays
+  local -a wt_paths=() wt_branches=()
+  local _path="" _branch=""
+
+  while IFS= read -r line; do
+    case "$line" in
+      worktree\ *) _path="${line#worktree }" ;;
+      branch\ *)   _branch="${line#branch refs/heads/}" ;;
+      "")
+        if [[ -n "$_path" ]]; then
+          wt_paths+=("$_path")
+          wt_branches+=("${_branch:-HEAD}")
+          _path="" _branch=""
+        fi
+        ;;
+    esac
+  done < <(git -C "$REPO_ROOT" worktree list --porcelain; printf '\n')
+
+  # Build and print table
+  {
+    printf '%s\n' "$header"
+    local i
+    for i in "${!wt_paths[@]}"; do
+      local wt_name ns
+      wt_name="$(wt_sanitize "${wt_branches[$i]}")"
+      ns="${ns_prefix}-${wt_name}"
+      (
+        export WT_NAME="$wt_name"
+        export WT_BRANCH="${wt_branches[$i]}"
+        export WT_NAMESPACE="$ns"
+        export WT_PATH="${wt_paths[$i]}"
+        export WT_REPO_ROOT="$REPO_ROOT"
+        bash "$on_status"
+      )
+    done
+  } | column -t -s $'\t'
 }
 
 wt_switch() {
@@ -130,6 +220,34 @@ wt_delete() {
     echo "Switch to another worktree first: wt switch <other-branch>" >&2
     exit 1
   fi
+  # ── k8s/hook integration ────────────────────────────────────────────────
+  local wt_config="$REPO_ROOT/.wt/config.sh"
+  if [[ -f "$wt_config" ]]; then
+    local wt_name wt_namespace
+    wt_name="$(wt_sanitize "$branch")"
+    # shellcheck source=.wt/config.sh
+    source "$wt_config"
+    local ns_prefix="${NAMESPACE_PREFIX:-wt}"
+    wt_namespace="${ns_prefix}-${wt_name}"
+
+    local on_delete="$REPO_ROOT/.wt/hooks/on-delete.sh"
+    if [[ -f "$on_delete" ]]; then
+      export WT_NAME="$wt_name"
+      export WT_BRANCH="$branch"
+      export WT_NAMESPACE="$wt_namespace"
+      export WT_PATH="$dest"
+      export WT_REPO_ROOT="$REPO_ROOT"
+      echo "Running on-delete hook..." >&2
+      if ! bash "$on_delete"; then
+        echo "Error: on-delete hook failed — aborting." >&2
+        exit 1
+      fi
+    fi
+
+    echo "Deleting k8s namespace: $wt_namespace" >&2
+    kubectl delete namespace "$wt_namespace" --ignore-not-found >&2
+  fi
+  # ────────────────────────────────────────────────────────────────────────
   # worktree remove fails if the worktree has uncommitted changes.
   if ! git -C "$REPO_ROOT" worktree remove "$dest"; then
     echo "Error: worktree has uncommitted changes." >&2
@@ -145,6 +263,197 @@ wt_delete() {
   echo "Deleted worktree: $branch"
 }
 
+wt_init() {
+  local wt_dir="$REPO_ROOT/.wt"
+  if [[ -d "$wt_dir" ]]; then
+    echo "Error: .wt/ already exists at $wt_dir" >&2
+    echo "  Delete it first or edit the files directly." >&2
+    exit 1
+  fi
+  mkdir -p "$wt_dir/hooks"
+  echo "Initializing .wt/ in $REPO_ROOT" >&2
+
+  # ── config.sh ────────────────────────────────────────────────────────────
+  cat > "$wt_dir/config.sh" <<'CONFIG_EOF'
+#!/usr/bin/env bash
+# .wt/config.sh — per-project wt configuration
+# Edit this file. All variables have sensible defaults.
+
+# k3d cluster name
+CLUSTER_NAME="dev-cluster"
+
+# Prefix for k8s namespace names (result: <prefix>-<sanitized-branch>)
+NAMESPACE_PREFIX="wt"
+
+# Namespace where shared infra services run
+INFRA_NAMESPACE="infra"
+
+# Services to build and import into k3d.
+# Format: "image-name:path/to/Dockerfile"  (path relative to repo root)
+SERVICES=()
+
+# Postgres StatefulSet pod name in INFRA_NAMESPACE (for DB cloning)
+PG_POD="postgres-0"
+PG_USER="postgres"
+
+# Template database to clone for each worktree (leave empty to skip DB clone)
+TEMPLATE_DB=""
+
+# Helm chart path relative to repo root
+HELM_CHART="charts/worktree"
+
+# Infra service names shown in 'wt list' (used as -l app=<name> label selectors)
+INFRA_SERVICES=()
+CONFIG_EOF
+
+  # ── on-create.sh ─────────────────────────────────────────────────────────
+  cat > "$wt_dir/hooks/on-create.sh" <<'ON_CREATE_EOF'
+#!/usr/bin/env bash
+# .wt/hooks/on-create.sh
+# Called by 'wt create' after the git worktree and k8s namespace are created.
+# Env vars: WT_NAME  WT_BRANCH  WT_NAMESPACE  WT_PATH  WT_REPO_ROOT
+set -euo pipefail
+
+# shellcheck source=../.wt/config.sh
+source "$WT_REPO_ROOT/.wt/config.sh"
+
+echo "==> Building and importing Docker images..."
+for entry in "${SERVICES[@]+"${SERVICES[@]}"}"; do
+  image_name="${entry%%:*}"
+  dockerfile="${entry#*:}"
+  tag="${image_name}:${WT_NAME}"
+  echo "  Building $tag from $dockerfile..." >&2
+  docker build -t "$tag" -f "$WT_REPO_ROOT/$dockerfile" "$WT_REPO_ROOT" >&2
+  echo "  Importing $tag into k3d cluster $CLUSTER_NAME..." >&2
+  k3d image import "$tag" -c "$CLUSTER_NAME" >&2
+done
+
+if [[ -n "${TEMPLATE_DB:-}" ]]; then
+  echo "==> Cloning database: $TEMPLATE_DB → $WT_NAME..."
+  kubectl exec -n "$INFRA_NAMESPACE" "$PG_POD" -- \
+    createdb -U "$PG_USER" "$WT_NAME" >&2
+  kubectl exec -n "$INFRA_NAMESPACE" "$PG_POD" -- \
+    pg_dump -U "$PG_USER" --no-owner --no-acl "$TEMPLATE_DB" \
+  | kubectl exec -i -n "$INFRA_NAMESPACE" "$PG_POD" -- \
+    psql -U "$PG_USER" -d "$WT_NAME" -q >&2
+fi
+
+echo "==> Installing Helm chart: $HELM_CHART..."
+helm install "$WT_NAME" "$WT_REPO_ROOT/$HELM_CHART" \
+  --namespace "$WT_NAMESPACE" \
+  --set "worktreeName=$WT_NAME" \
+  --set "branch=$WT_BRANCH" \
+  --set "dbName=$WT_NAME" \
+  --set "infraNamespace=$INFRA_NAMESPACE" >&2
+
+echo "==> Waiting for deployments to be ready (timeout: 5m)..."
+kubectl wait --for=condition=available \
+  --timeout=300s \
+  deployment --all \
+  -n "$WT_NAMESPACE" >&2 || {
+  echo "Warning: some deployments did not become ready within 5 minutes." >&2
+  kubectl get pods -n "$WT_NAMESPACE" >&2
+}
+
+echo "==> Worktree $WT_NAME is ready in namespace $WT_NAMESPACE"
+ON_CREATE_EOF
+
+  # ── on-delete.sh ─────────────────────────────────────────────────────────
+  cat > "$wt_dir/hooks/on-delete.sh" <<'ON_DELETE_EOF'
+#!/usr/bin/env bash
+# .wt/hooks/on-delete.sh
+# Called by 'wt delete' before the namespace and git worktree are removed.
+# Env vars: WT_NAME  WT_BRANCH  WT_NAMESPACE  WT_PATH  WT_REPO_ROOT
+set -euo pipefail
+
+# shellcheck source=../.wt/config.sh
+source "$WT_REPO_ROOT/.wt/config.sh"
+
+echo "==> Uninstalling Helm release: $WT_NAME..."
+if helm status "$WT_NAME" --namespace "$WT_NAMESPACE" &>/dev/null; then
+  helm uninstall "$WT_NAME" --namespace "$WT_NAMESPACE" >&2
+else
+  echo "  Release $WT_NAME not found in $WT_NAMESPACE — skipping." >&2
+fi
+
+if [[ -n "${TEMPLATE_DB:-}" ]]; then
+  echo "==> Dropping database: $WT_NAME..."
+  kubectl exec -n "$INFRA_NAMESPACE" "$PG_POD" -- \
+    psql -U "$PG_USER" -c "DROP DATABASE IF EXISTS \"${WT_NAME}\";" >&2
+fi
+
+echo "==> Cleanup complete for $WT_NAME"
+ON_DELETE_EOF
+
+  # ── on-status.sh ─────────────────────────────────────────────────────────
+  cat > "$wt_dir/hooks/on-status.sh" <<'ON_STATUS_EOF'
+#!/usr/bin/env bash
+# .wt/hooks/on-status.sh
+# Called by 'wt list'.
+#   --header  : print tab-separated column headers to stdout
+#   (no args) : print tab-separated status values for WT_NAMESPACE
+# Env vars: WT_NAME  WT_BRANCH  WT_NAMESPACE  WT_PATH  WT_REPO_ROOT
+set -euo pipefail
+
+# shellcheck source=../.wt/config.sh
+source "$WT_REPO_ROOT/.wt/config.sh"
+
+if [[ "${1:-}" == "--header" ]]; then
+  header="NAME\tSTATUS"
+  for svc in "${INFRA_SERVICES[@]+"${INFRA_SERVICES[@]}"}"; do
+    header+="\t$(printf '%s' "$svc" | tr '[:lower:]' '[:upper:]')"
+  done
+  header+="\tSENSORS"
+  printf '%b\n' "$header"
+  exit 0
+fi
+
+# NAME
+row="$WT_NAME"
+
+# STATUS (namespace phase)
+ns_status="$(kubectl get namespace "$WT_NAMESPACE" \
+  --no-headers -o custom-columns=S:.status.phase 2>/dev/null || printf 'Missing')"
+row+="\t${ns_status}"
+
+# Per-service pod status
+for svc in "${INFRA_SERVICES[@]+"${INFRA_SERVICES[@]}"}"; do
+  pod_line="$(kubectl get pods \
+    -n "$INFRA_NAMESPACE" -l "app=${svc}" \
+    --no-headers 2>/dev/null | head -1 || true)"
+  if [[ -z "$pod_line" ]]; then
+    svc_status="Missing"
+  elif printf '%s' "$pod_line" | grep -q "Running"; then
+    svc_status="Running"
+  else
+    svc_status="NotReady"
+  fi
+  row+="\t${svc_status}"
+done
+
+# SENSORS (Running/Total pods with label type=sensor)
+total="$(kubectl get pods -n "$WT_NAMESPACE" -l type=sensor \
+  --no-headers 2>/dev/null | wc -l | tr -d ' ' || printf '0')"
+running="$(kubectl get pods -n "$WT_NAMESPACE" -l type=sensor \
+  --no-headers 2>/dev/null | grep -c "Running" || printf '0')"
+row+="\t${running}/${total}"
+
+printf '%b\n' "$row"
+ON_STATUS_EOF
+
+  chmod +x "$wt_dir/hooks/on-create.sh" \
+           "$wt_dir/hooks/on-delete.sh" \
+           "$wt_dir/hooks/on-status.sh"
+
+  echo "Created:"
+  echo "  $wt_dir/config.sh"
+  echo "  $wt_dir/hooks/on-create.sh"
+  echo "  $wt_dir/hooks/on-delete.sh"
+  echo "  $wt_dir/hooks/on-status.sh"
+  echo ""
+  echo "Next: edit $wt_dir/config.sh for your project, then run 'wt create <branch>'"
+}
+
 cmd="${1:-}"
 shift || true
 
@@ -153,5 +462,6 @@ case "$cmd" in
   list)   wt_list ;;
   switch) wt_switch "$@" ;;
   delete) wt_delete "$@" ;;
+  init)   wt_init ;;
   *)      usage; exit 1 ;;
 esac
