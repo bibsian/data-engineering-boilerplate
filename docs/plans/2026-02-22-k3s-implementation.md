@@ -1317,6 +1317,32 @@ kubectl create secret generic warehouse-credentials \
   --from-literal=POSTGRES_PASSWORD=<your-password>
 kubectl apply -f k8s/infra/
 
+# Checking infra spinup
+kubectl get pods -n infra
+
+# Checking logs of pods with crashes
+kubectl logs -n infra kafka-785d4d8dfc-mx5ft
+kubectl logs -n infra warehouse-0
+
+# Redeploying After yaml edits example:
+kubectl delete deployment kafka -n infra # Delete first
+kubectl delete job kafka-init -n infra
+kubectl apply -f k8s/infra/kafka-deployment.yaml
+kubectl rollout restart deployment kafka -n infra
+
+#Scaling down cluster
+kubectl scale deployment kafka -n infra --replicas=0
+sleep 20
+kubectl scale deployment kafka -n infra --replicas=1
+
+# Deleting Statefulset and PersistentVolumeClaim & redeploying
+kubectl delete statefulset warehouse -n infra
+kubectl delete pvc warehouse-0 -n infra
+kubectl apply -f k8s/infra/warehouse-deployment.yaml
+
+# Verify new Pod environemnt
+kubectl describe pod -n infra -l app=kafka | grep -A 30 "Environment"
+
 # Per-worktree workflow
 wt create my-feature --go   # builds images, clones DB, deploys chart
 wt list                     # formatted status table
